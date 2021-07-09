@@ -1,36 +1,38 @@
 //SPDX-License-Identifier: Unlicense
 pragma solidity ^0.8.4;
 
+import "./Ownable.sol";
+
 error InvalidValue();
 error ElementNotFound();
 
-contract ListRegistry {
+contract ListRegistry is Ownable {
   struct List {
-    uint128 first;
-    uint128 last;
+    bytes16 first;
+    bytes16 last;
   }
 
   struct Element {
-    uint128 previous;
-    uint128 next;
+    bytes16 previous;
+    bytes16 next;
     string value;
   }
 
   mapping(bytes32 => List) private lists;
-  mapping(bytes32 => mapping(uint128 => Element)) private listData;
+  mapping(bytes32 => mapping(bytes16 => Element)) private listData;
 
-  event ElementAdded(bytes32 indexed list, uint128 index, string value);
-  event ElementRemoved(bytes32 indexed list, uint128 index, string value);
+  event ElementAdded(bytes32 indexed list, bytes16 index, string value);
+  event ElementRemoved(bytes32 indexed list, bytes16 index, string value);
 
-  function getList(bytes32 list) external view returns (uint128 first, uint128 last) {
+  function getList(bytes32 list) external view returns (bytes16 first, bytes16 last) {
     List memory _list = lists[list];
     return (_list.first, _list.last);
   }
 
-  function getElement(bytes32 list, uint128 index) external view returns (
+  function getElement(bytes32 list, bytes16 index) external view returns (
     string memory value,
-    uint128 previous,
-    uint128 next
+    bytes16 previous,
+    bytes16 next
   ) {
     Element memory _element = listData[list][index];
 
@@ -44,8 +46,8 @@ contract ListRegistry {
   function getFullList(bytes32 list) external view returns (string[] memory listValues) {
     uint256 length = 0;
 
-    uint128 first = lists[list].first;
-    uint128 next = first;
+    bytes16 first = lists[list].first;
+    bytes16 next = first;
     if (next == 0) {
       return new string[](0);
     }
@@ -69,7 +71,7 @@ contract ListRegistry {
     }
   }
 
-  function addElement(bytes32 list, string calldata value) external returns (uint128 index) {
+  function addElement(bytes32 list, string calldata value) external onlyOwner returns (bytes16 index) {
     if (bytes(value).length == 0) {
       revert InvalidValue();
     }
@@ -90,7 +92,7 @@ contract ListRegistry {
     emit ElementAdded(list, index, value);
   }
 
-  function removeElement(bytes32 list, uint128 index) external {
+  function removeElement(bytes32 list, bytes16 index) external onlyOwner {
     List memory _list = lists[list];
 
     Element memory _element = listData[list][index];
@@ -115,7 +117,7 @@ contract ListRegistry {
     emit ElementRemoved(list, index, _element.value);
   }
 
-  function psuedoRandomID(string memory value) private view returns (uint128) {
-    return uint128(uint256(keccak256(abi.encodePacked(block.difficulty, block.timestamp, value))));        
+  function psuedoRandomID(string memory value) private view returns (bytes16) {
+    return bytes16(keccak256(abi.encodePacked(block.difficulty, block.timestamp, value)));        
   }
 }
