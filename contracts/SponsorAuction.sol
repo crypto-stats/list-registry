@@ -21,15 +21,15 @@ error InsufficentBidToSwap(uint256 currentBid, uint256 attemptedSwapBid);
 
 contract SponsorAuction is Ownable {
   struct Sponsor {
-    IERC20 token;            // 20 bytes -- slot 1
+    uint128 balance;         // 16 bytes -- slot 1
     bool approved;           // 1 byte
     bool active;             // 1 byte
     uint8 slot;              // 1 byte
     uint32 lastUpdated;      // 4 bytes
     address owner;           // 20 bytes -- slot 2
-    uint128 balance;         // 16 bytes -- slot 3
-    uint128 paymentPerBlock; // 16 bytes
-    bytes16 campaign;        // 16 bytes -- slot 4
+    IERC20 token;            // 20 bytes -- slot 3
+    uint128 paymentPerBlock; // 16 bytes -- slot 4
+    bytes16 campaign;        // 16 bytes
     string metadata;
   }
 
@@ -72,7 +72,10 @@ contract SponsorAuction is Ownable {
   event MetadataUpdated(bytes32 indexed sponsor, string metadata);
   event SponsorOwnerTransferred(bytes32 indexed sponsor, address newOwner);
   event BidUpdated(bytes32 indexed sponsor, address indexed token, uint256 paymentPerBlock);
+
   event Deposit(bytes32 indexed sponsor, address indexed token, uint256 amount);
+  event Withdrawal(bytes32 indexed sponsor, address indexed token, uint256 amount);
+
   event ApprovalSet(bytes32 indexed sponsor, bool approved);
   event NumberOfSlotsChanged(bytes16 indexed campaign, uint8 newNumSlots);
   event TreasuryWithdrawal(address indexed token, address indexed recipient, uint256 amount);
@@ -258,15 +261,22 @@ contract SponsorAuction is Ownable {
       return 0;
     }
 
-    withdrawAmount = amountRequested > balance ? balance : amountRequested;
+    uint128 _withdrawAmount = uint128(amountRequested) > balance ? balance : uint128(amountRequested);
+    withdrawAmount = _withdrawAmount;
 
     if (active && withdrawAmount == balance) {
       clearSlot(sponsor.campaign, sponsor.slot);
+      sponsors[sponsorId].active = false;
+      // sponsor.slot doesn't need to be changed, since it's never read while deactivated
 
       emit SponsorDeactivated(sponsor.campaign, sponsorId);
     }
 
+    sponsors[sponsorId].balance = balance - _withdrawAmount;
+
     SafeERC20.safeTransfer(sponsor.token, recipient, withdrawAmount);
+
+    emit Withdrawal(sponsorId, address(sponsor.token), withdrawAmount);
   }
 
   function transferSponsorOwnership(bytes32 sponsorId, address newOwner) external {
@@ -437,6 +447,7 @@ contract SponsorAuction is Ownable {
     }
     if (!newActiveState) {
       clearSlot(sponsor.campaign, sponsor.slot);
+      // sponsor.slot doesn't need to be changed, since it's never read while deactivated
 
       emit SponsorDeactivated(sponsor.campaign, sponsorId);
     }

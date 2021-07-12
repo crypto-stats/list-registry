@@ -1,5 +1,10 @@
 const { expect } = require("chai");
 
+async function mineBlocks(numBlocks) {
+  for (let i = 0; i < numBlocks; i += 1) {
+    await ethers.provider.send("evm_mine");
+  }
+}
 
 describe("SponsorAuction", function() {
   let auction;
@@ -176,9 +181,7 @@ describe("SponsorAuction", function() {
             expect(balance.storedBalance).to.equal(1000);
             expect(balance.pendingPayment).to.equal(0);
 
-            await ethers.provider.send("evm_mine");
-            await ethers.provider.send("evm_mine");
-            await ethers.provider.send("evm_mine");
+            await mineBlocks(3);
 
             balance = await auction.sponsorBalance(sponsorId);
             expect(balance.balance).to.equal(700);
@@ -197,6 +200,74 @@ describe("SponsorAuction", function() {
 
             const amountCollected = await auction.paymentCollected(token.address);
             expect(amountCollected).to.equal(400);
+          });
+
+          it('should accrue payment over time, and let the sponsor withdraw the remainder', async () => {
+            let balance = await auction.sponsorBalance(sponsorId);
+            expect(balance.balance).to.equal(1000);
+            expect(balance.storedBalance).to.equal(1000);
+            expect(balance.pendingPayment).to.equal(0);
+
+            await mineBlocks(3);
+
+            balance = await auction.sponsorBalance(sponsorId);
+            expect(balance.balance).to.equal(700);
+            expect(balance.storedBalance).to.equal(1000);
+            expect(balance.pendingPayment).to.equal(300);
+
+            // Payment will increase by 100, since processPayment will be in a subsequent block
+            await expect(auction.connect(sponsor1).withdraw(sponsorId, 1000, await user.getAddress()))
+              .to.emit(auction, 'PaymentProcessed')
+              .withArgs(feeCampaignId, sponsorId, token.address, 400)
+              .to.emit(auction, 'SponsorDeactivated')
+              .withArgs(feeCampaignId, sponsorId)
+              .to.emit(auction, 'Withdrawal')
+              .withArgs(sponsorId, token.address, 600);
+
+            balance = await auction.sponsorBalance(sponsorId);
+            expect(balance.balance).to.equal(0);
+            expect(balance.storedBalance).to.equal(0);
+            expect(balance.pendingPayment).to.equal(0);
+
+            const withdrawBalance = await token.balanceOf(await user.getAddress());
+            expect(withdrawBalance).to.equal(600);
+
+            const amountCollected = await auction.paymentCollected(token.address);
+            expect(amountCollected).to.equal(400);
+          });
+
+          it('should let any user deactivate after all funds spent', async () => {
+            let balance = await auction.sponsorBalance(sponsorId);
+            expect(balance.balance).to.equal(1000);
+            expect(balance.storedBalance).to.equal(1000);
+            expect(balance.pendingPayment).to.equal(0);
+
+            await mineBlocks(11);
+
+            balance = await auction.sponsorBalance(sponsorId);
+            expect(balance.balance).to.equal(0);
+            expect(balance.storedBalance).to.equal(1000);
+            expect(balance.pendingPayment).to.equal(1000);
+
+            await expect(auction.connect(user).processPayment(sponsorId))
+              .to.emit(auction, 'PaymentProcessed')
+              .withArgs(feeCampaignId, sponsorId, token.address, 1000)
+              .to.emit(auction, 'SponsorDeactivated')
+              .withArgs(feeCampaignId, sponsorId);
+
+            balance = await auction.sponsorBalance(sponsorId);
+            expect(balance.balance).to.equal(0);
+            expect(balance.storedBalance).to.equal(0);
+            expect(balance.pendingPayment).to.equal(0);
+
+            const sponsor = await auction.getSponsor(sponsorId);
+            expect(sponsor.active).to.equal(false);
+
+            const activeSponsors = await auction.getActiveSponsors(feeCampaignId);
+            expect(activeSponsors).to.deep.equal([]);
+
+            const amountCollected = await auction.paymentCollected(token.address);
+            expect(amountCollected).to.equal(1000);
           });
 
           it('should not let an active sponsor be "lifted"');
