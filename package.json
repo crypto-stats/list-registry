@@ -11,6 +11,7 @@
   "dependencies": {
     "@openzeppelin/contracts": "^4.2.0",
     "@uniswap/v3-core": "^1.0.0",
-    "hardhat-interface-generator": "^0.0.6"
+    "dotenv": "^10.0.0",
+    "hardhat-deploy": "^0.9.1"
   }
 }
