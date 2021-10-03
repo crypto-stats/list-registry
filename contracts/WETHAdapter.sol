@@ -19,13 +19,13 @@ contract WETHAdapter {
 
   function createSponsor(
     bytes16 campaign,
-    uint128 paymentPerBlock,
+    uint128 paymentPerSecond,
     string calldata metadata
   ) external payable returns (bytes32 id) {
     weth.deposit{ value: msg.value }();
     weth.approve(address(auction), msg.value);
 
-    id = auction.createSponsor(address(weth), campaign, uint128(msg.value), paymentPerBlock, metadata);
+    id = auction.createSponsor(address(weth), campaign, uint128(msg.value), paymentPerSecond, metadata);
     auction.transferSponsorOwnership(id, msg.sender);
   }
 

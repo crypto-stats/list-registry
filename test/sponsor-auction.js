@@ -68,7 +68,7 @@ describe("SponsorAuction", function() {
       expect(events[0].args.campaign).to.equal(feeCampaignId);
       expect(events[0].args.owner).to.equal(await sponsor1.getAddress());
       expect(events[0].args.token).to.equal(token.address);
-      expect(events[0].args.paymentPerBlock).to.equal(100);
+      expect(events[0].args.paymentPerSecond).to.equal(100);
       expect(events[0].args.metadata).to.equal('Test');
       const { sponsor: id } = events[0].args;
 
@@ -78,7 +78,7 @@ describe("SponsorAuction", function() {
       expect(sponsor.approved).to.equal(false);
       expect(sponsor.active).to.equal(false);
       expect(sponsor.token).to.equal(token.address);
-      expect(sponsor.paymentPerBlock).to.equal(100);
+      expect(sponsor.paymentPerSecond).to.equal(100);
       expect(sponsor.campaign).to.equal(feeCampaignId);
       expect(sponsor.metadata).to.equal('Test');
     });
@@ -92,7 +92,7 @@ describe("SponsorAuction", function() {
       expect(events[2].args.campaign).to.equal(feeCampaignId);
       expect(events[2].args.owner).to.equal(await sponsor1.getAddress());
       expect(events[2].args.token).to.equal(token.address);
-      expect(events[2].args.paymentPerBlock).to.equal(100);
+      expect(events[2].args.paymentPerSecond).to.equal(100);
       expect(events[2].args.metadata).to.equal('Test');
       const { sponsor: id } = events[2].args;
       
@@ -107,7 +107,7 @@ describe("SponsorAuction", function() {
       expect(sponsor.approved).to.equal(false);
       expect(sponsor.active).to.equal(false);
       expect(sponsor.token).to.equal(token.address);
-      expect(sponsor.paymentPerBlock).to.equal(100);
+      expect(sponsor.paymentPerSecond).to.equal(100);
       expect(sponsor.campaign).to.equal(feeCampaignId);
       expect(sponsor.metadata).to.equal('Test');
 

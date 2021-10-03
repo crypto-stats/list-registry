@@ -43,7 +43,7 @@ describe("WETH Adapter", function() {
     expect(newSponsorEvent.args.campaign).to.equal(feeCampaignId);
     expect(newSponsorEvent.args.owner).to.equal(adapter.address);
     expect(newSponsorEvent.args.token).to.equal(weth.address);
-    expect(newSponsorEvent.args.paymentPerBlock).to.equal(100);
+    expect(newSponsorEvent.args.paymentPerSecond).to.equal(100);
     expect(newSponsorEvent.args.metadata).to.equal('Test');
     const { sponsor: id } = newSponsorEvent.args;
 
@@ -64,7 +64,7 @@ describe("WETH Adapter", function() {
     expect(sponsor.approved).to.equal(false);
     expect(sponsor.active).to.equal(false);
     expect(sponsor.token).to.equal(weth.address);
-    expect(sponsor.paymentPerBlock).to.equal(100);
+    expect(sponsor.paymentPerSecond).to.equal(100);
     expect(sponsor.campaign).to.equal(feeCampaignId);
     expect(sponsor.metadata).to.equal('Test');
 

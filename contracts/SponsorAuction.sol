@@ -29,7 +29,7 @@ contract SponsorAuction is Ownable {
     uint32 lastUpdated;      // 4 bytes
     address owner;           // 20 bytes -- slot 2
     IERC20 token;            // 20 bytes -- slot 3
-    uint128 paymentPerBlock; // 16 bytes -- slot 4
+    uint128 paymentPerSecond; // 16 bytes -- slot 4
     bytes16 campaign;        // 16 bytes
     string metadata;
   }
@@ -54,7 +54,7 @@ contract SponsorAuction is Ownable {
     bytes16 indexed campaign,
     address indexed owner,
     address token,
-    uint128 paymentPerBlock,
+    uint128 paymentPerSecond,
     string metadata
   );
   event PaymentProcessed(
@@ -72,7 +72,7 @@ contract SponsorAuction is Ownable {
   );
   event MetadataUpdated(bytes32 indexed sponsor, string metadata);
   event SponsorOwnerTransferred(bytes32 indexed sponsor, address newOwner);
-  event BidUpdated(bytes32 indexed sponsor, address indexed token, uint256 paymentPerBlock);
+  event BidUpdated(bytes32 indexed sponsor, address indexed token, uint256 paymentPerSecond);
 
   event Deposit(bytes32 indexed sponsor, address indexed token, uint256 amount);
   event Withdrawal(bytes32 indexed sponsor, address indexed token, uint256 amount);
@@ -94,7 +94,7 @@ contract SponsorAuction is Ownable {
     bool approved,
     bool active,
     IERC20 token,
-    uint128 paymentPerBlock,
+    uint128 paymentPerSecond,
     bytes16 campaign,
     uint32 lastUpdated,
     string memory metadata
@@ -104,7 +104,7 @@ contract SponsorAuction is Ownable {
     approved = sponsor.approved;
     active = sponsor.active;
     token = sponsor.token;
-    paymentPerBlock = sponsor.paymentPerBlock;
+    paymentPerSecond = sponsor.paymentPerSecond;
     campaign = sponsor.campaign;
     lastUpdated = sponsor.lastUpdated;
     metadata = sponsor.metadata;
@@ -123,8 +123,8 @@ contract SponsorAuction is Ownable {
   ) {
     Sponsor memory sponsor = sponsors[sponsorId];
 
-    uint256 blocksElapsed = block.number - sponsor.lastUpdated;
-    pendingPayment = uint128(blocksElapsed) * sponsor.paymentPerBlock;
+    uint256 timeElapsed = block.timestamp - sponsor.lastUpdated;
+    pendingPayment = uint128(timeElapsed) * sponsor.paymentPerSecond;
 
     if (pendingPayment > sponsor.balance) {
       // If their balance is too small, we just zero the balance
@@ -145,16 +145,16 @@ contract SponsorAuction is Ownable {
   }
 
   function paymentRate(bytes32 sponsorId) external view returns (
-    uint128 paymentPerBlock,
-    uint128 paymentPerBlockInETH
+    uint128 paymentPerSecond,
+    uint128 paymentPerSecondInETH
   ) {
     Sponsor memory sponsor = sponsors[sponsorId];
-    paymentPerBlock = sponsor.paymentPerBlock;
-    uint256 paymentPerBlockInETH256 = oracle.getPrice(address(sponsor.token), paymentPerBlock);
+    paymentPerSecond = sponsor.paymentPerSecond;
+    uint256 paymentPerSecondInETH256 = oracle.getPrice(address(sponsor.token), paymentPerSecond);
     // In the unlikely case of a 128-bit overflow, use MAX_INT for uint128
-    paymentPerBlockInETH = paymentPerBlockInETH256 > type(uint128).max
+    paymentPerSecondInETH = paymentPerSecondInETH256 > type(uint128).max
       ? type(uint128).max
-      : uint128(paymentPerBlockInETH256);
+      : uint128(paymentPerSecondInETH256);
   }
 
   // Sponsor functions
@@ -163,11 +163,11 @@ contract SponsorAuction is Ownable {
     address _token,
     bytes16 campaign,
     uint256 initialDeposit,
-    uint128 paymentPerBlock,
+    uint128 paymentPerSecond,
     string calldata metadata
   ) external returns (bytes32 id) {
     if (campaign == bytes16(0) || _token == address(0)) {
-      // TODO: ensure paymentPerBlock is small enough that the payment always fits into uint128
+      // TODO: ensure paymentPerSecond is small enough that the payment always fits into uint128
       revert InvalidValue();
     }
 
@@ -183,15 +183,15 @@ contract SponsorAuction is Ownable {
       owner: msg.sender,
       token: IERC20(_token),
       balance: balance,
-      paymentPerBlock: paymentPerBlock,
-      lastUpdated: uint32(block.number),
+      paymentPerSecond: paymentPerSecond,
+      lastUpdated: uint32(block.timestamp),
       approved: false,
       active: false,
       slot: 0,
       metadata: metadata
     });
 
-    emit NewSponsor(id, campaign, msg.sender, _token, paymentPerBlock, metadata);
+    emit NewSponsor(id, campaign, msg.sender, _token, paymentPerSecond, metadata);
 
     if (balance > 0) {
       emit Deposit(id, _token, balance);
@@ -215,7 +215,7 @@ contract SponsorAuction is Ownable {
     }
   }
 
-  function updateBid(bytes32 sponsorId, address token, uint128 paymentPerBlock) external {
+  function updateBid(bytes32 sponsorId, address token, uint128 paymentPerSecond) external {
     Sponsor memory sponsor = sponsors[sponsorId];
     if (sponsor.owner != msg.sender) {
       revert MustBeCalledBySponsorOwner(sponsor.owner);
@@ -230,9 +230,9 @@ contract SponsorAuction is Ownable {
     }
 
     sponsors[sponsorId].token = IERC20(token);
-    sponsors[sponsorId].paymentPerBlock = paymentPerBlock;
+    sponsors[sponsorId].paymentPerSecond = paymentPerSecond;
 
-    emit BidUpdated(sponsorId, token, paymentPerBlock);
+    emit BidUpdated(sponsorId, token, paymentPerSecond);
   }
 
   function updateMetadata(bytes32 sponsorId, string calldata metadata) external {
@@ -376,8 +376,8 @@ contract SponsorAuction is Ownable {
       revert SponsorInactive(activeSponsorId);
     }
 
-    uint256 inactiveBidInETH = oracle.getPrice(address(inactiveSponsor.token), inactiveSponsor.paymentPerBlock);
-    uint256 activeBidInETH = oracle.getPrice(address(activeSponsor.token), activeSponsor.paymentPerBlock);
+    uint256 inactiveBidInETH = oracle.getPrice(address(inactiveSponsor.token), inactiveSponsor.paymentPerSecond);
+    uint256 activeBidInETH = oracle.getPrice(address(activeSponsor.token), activeSponsor.paymentPerSecond);
 
     if (inactiveBidInETH <= activeBidInETH) {
       revert InsufficentBidToSwap(activeBidInETH, inactiveBidInETH);
@@ -427,7 +427,7 @@ contract SponsorAuction is Ownable {
   // Private functions
 
   function activateSponsor(bytes32 sponsorId, bytes16 campaign, uint8 slot) private {
-    sponsors[sponsorId].lastUpdated = uint32(block.number);
+    sponsors[sponsorId].lastUpdated = uint32(block.timestamp);
     sponsors[sponsorId].active = true;
     sponsors[sponsorId].slot = slot;
 
@@ -443,8 +443,8 @@ contract SponsorAuction is Ownable {
   ) private returns (bool newActiveState, uint128 newBalance) {
     newActiveState = !forceDeactivate;
 
-    uint256 blocksElapsed = block.number - sponsor.lastUpdated;
-    uint128 pendingPayment = uint128(blocksElapsed) * sponsor.paymentPerBlock;
+    uint256 timeElapsed = block.timestamp - sponsor.lastUpdated;
+    uint128 pendingPayment = uint128(timeElapsed) * sponsor.paymentPerSecond;
 
     if (pendingPayment > sponsor.balance) {
       // If their balance is too small, we just zero the balance
@@ -456,7 +456,7 @@ contract SponsorAuction is Ownable {
 
     newBalance = sponsor.balance - pendingPayment;
     sponsors[sponsorId].balance = newBalance;
-    sponsors[sponsorId].lastUpdated = uint32(block.number);
+    sponsors[sponsorId].lastUpdated = uint32(block.timestamp);
     sponsors[sponsorId].active = newActiveState;
 
     if (pendingPayment > 0) {
@@ -489,8 +489,6 @@ contract SponsorAuction is Ownable {
   }
 
   function _deposit(IERC20 token, uint256 amount) private returns (uint128) {
-    IERC20 token = IERC20(token);
-
     uint256 startingBalance = token.balanceOf(address(this));
     SafeERC20.safeTransferFrom(token, msg.sender, address(this), amount);
     uint256 endBalance = token.balanceOf(address(this));
