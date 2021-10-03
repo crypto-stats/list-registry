@@ -17,6 +17,7 @@ error UnapprovedSponsor(bytes32 sponsorId);
 error SponsorAlreadyActive(bytes32 sponsorId);
 error SponsorInactive(bytes32 sponsorId);
 error SponsorBalanceEmpty(bytes32 sponsorId);
+error MustWithdrawBalanceToChangeToken(bytes32 sponsorId);
 error InsufficentBidToSwap(uint256 currentBid, uint256 attemptedSwapBid);
 
 contract SponsorAuction is Ownable {
@@ -224,6 +225,10 @@ contract SponsorAuction is Ownable {
       updateSponsor(sponsorId, sponsor, false);
     }
 
+    if (address(sponsor.token) != token && sponsor.balance > 0) {
+      revert MustWithdrawBalanceToChangeToken(sponsorId);
+    }
+
     sponsors[sponsorId].token = IERC20(token);
     sponsors[sponsorId].paymentPerBlock = paymentPerBlock;
 
@@ -231,14 +236,31 @@ contract SponsorAuction is Ownable {
   }
 
   function updateMetadata(bytes32 sponsorId, string calldata metadata) external {
-    address _owner = sponsors[sponsorId].owner;
-    if (_owner != msg.sender) {
+    Sponsor memory sponsor = sponsors[sponsorId];
+    address _owner = sponsor.owner;
+    if (sponsors[sponsorId].owner != msg.sender) {
       revert MustBeCalledBySponsorOwner(_owner);
+    }
+
+    if (sponsor.active) {
+      updateSponsor(sponsorId, sponsor, false);
     }
 
     sponsors[sponsorId].metadata = metadata;
 
+    if (sponsor.approved || sponsor.active) {
+      sponsors[sponsorId].approved = false;
+      sponsors[sponsorId].active = false;
+    }
+
     emit MetadataUpdated(sponsorId, metadata);
+
+    if (sponsor.active) {
+      emit SponsorDeactivated(sponsor.campaign, sponsorId);
+    }
+    if (sponsor.approved) {
+      emit ApprovalSet(sponsorId, false);
+    }
   }
 
   function withdraw(
