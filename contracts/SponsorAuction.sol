@@ -211,7 +211,7 @@ contract SponsorAuction is Ownable {
     emit Deposit(sponsorId, address(sponsor.token), depositReceived);
 
     if (sponsor.active) {
-      updateSponsor(sponsorId, sponsor, false);
+      updateSponsor(sponsorId, sponsor, false, false);
     }
   }
 
@@ -222,7 +222,7 @@ contract SponsorAuction is Ownable {
     }
 
     if (sponsor.active) {
-      updateSponsor(sponsorId, sponsor, false);
+      updateSponsor(sponsorId, sponsor, false, false);
     }
 
     if (address(sponsor.token) != token && sponsor.balance > 0) {
@@ -243,7 +243,7 @@ contract SponsorAuction is Ownable {
     }
 
     if (sponsor.active) {
-      updateSponsor(sponsorId, sponsor, false);
+      updateSponsor(sponsorId, sponsor, false, false);
     }
 
     sponsors[sponsorId].metadata = metadata;
@@ -276,7 +276,7 @@ contract SponsorAuction is Ownable {
     uint128 balance = sponsor.balance;
     bool active = sponsor.active;
     if (active) {
-      (active, balance) = updateSponsor(sponsorId, sponsor, false);
+      (active, balance) = updateSponsor(sponsorId, sponsor, false, false);
     }
 
     if (balance == 0) {
@@ -336,6 +336,8 @@ contract SponsorAuction is Ownable {
     campaigns[sponsor.campaign].activeSlots = campaign.activeSlots + 1;
   }
 
+  /// @notice If a campaign reduces the number of slots, any active sponsor may be dropped
+  /// @param sponsorId The ID of a sponsor
   function drop(bytes32 sponsorId) external {
     Sponsor memory sponsor = sponsors[sponsorId];
     if (!sponsor.active) {
@@ -348,7 +350,7 @@ contract SponsorAuction is Ownable {
       revert SponsorListNotOversized(sponsor.campaign);
     }
 
-    updateSponsor(sponsorId, sponsor, true);
+    updateSponsor(sponsorId, sponsor, true, false);
     campaigns[sponsor.campaign].activeSlots = campaign.activeSlots - 1;
   }
 
@@ -383,7 +385,7 @@ contract SponsorAuction is Ownable {
       revert InsufficentBidToSwap(activeBidInETH, inactiveBidInETH);
     }
 
-    updateSponsor(activeSponsorId, activeSponsor, true);
+    updateSponsor(activeSponsorId, activeSponsor, true, true);
 
     activateSponsor(inactiveSponsorId, inactiveSponsor.campaign, activeSponsor.slot);
 
@@ -400,7 +402,7 @@ contract SponsorAuction is Ownable {
       revert SponsorInactive(sponsorId);
     }
 
-    updateSponsor(sponsorId, sponsor, false);
+    updateSponsor(sponsorId, sponsor, false, false);
   }
 
   // Owner actions
@@ -436,10 +438,16 @@ contract SponsorAuction is Ownable {
     emit SponsorActivated(campaign, sponsorId);
   }
 
+  /// @notice For a given sponsor, it will process pending payments and deactivate if necessary
+  /// @param sponsorId The ID of a sponsor
+  /// @param sponsor The current sponsor state
+  /// @param forceDeactivate Deactivate the sponsor, even if there is sufficent balance (used in swap/drop)
+  /// @param skipClearingSlot Leave the campaign slot enabled (used in swap)
   function updateSponsor(
     bytes32 sponsorId,
     Sponsor memory sponsor,
-    bool forceDeactivate
+    bool forceDeactivate,
+    bool skipClearingSlot
   ) private returns (bool newActiveState, uint128 newBalance) {
     newActiveState = !forceDeactivate;
 
@@ -468,8 +476,10 @@ contract SponsorAuction is Ownable {
       );
     }
     if (!newActiveState) {
-      clearSlot(sponsor.campaign, sponsor.slot);
-      // sponsor.slot doesn't need to be changed, since it's never read while deactivated
+      if (!skipClearingSlot) {
+        clearSlot(sponsor.campaign, sponsor.slot);
+        // sponsor.slot doesn't need to be changed, since it's never read while deactivated
+      }
 
       emit SponsorDeactivated(sponsor.campaign, sponsorId);
     }

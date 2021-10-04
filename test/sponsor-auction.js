@@ -272,7 +272,74 @@ describe("SponsorAuction", function() {
 
           it('should not let an active sponsor be "lifted"');
 
-          describe('with more sponsors than slots', function() {});
+          describe('with more sponsors than slots', function() {
+            let sponsorId2;
+            let sponsorId3;
+
+            beforeEach(async () => {
+              const tx1 = await auction.connect(sponsor1).createSponsor(token.address, feeCampaignId, 1000, 120, 'Test');
+              const { events: events1 } = await tx1.wait();
+              sponsorId2 = events1[3].args.sponsor;
+              await auction.setApproved(sponsorId2, true);
+
+              const tx2 = await auction.connect(sponsor1).createSponsor(token.address, feeCampaignId, 1000, 140, 'Test');
+              const { events: events2 } = await tx2.wait();
+              sponsorId3 = events2[3].args.sponsor;
+              await auction.setApproved(sponsorId3, true);
+            });
+
+            it('should allow lifting & swapping the sponsors into order', async () => {
+              await auction.lift(sponsorId2);
+
+              let campaign = await auction.getCampaign(feeCampaignId);
+              expect(campaign.slots).to.equal(2);
+              expect(campaign.activeSlots).to.equal(2);
+
+              let sponsor2 = await auction.getSponsor(sponsorId2);
+              expect(sponsor2.active).to.equal(true);
+
+              let activeSponsors = await auction.getActiveSponsors(feeCampaignId);
+              expect(activeSponsors).to.deep.equal([sponsorId, sponsorId2]);
+
+
+              await expect(auction.swap(sponsorId3, sponsorId2))
+                .to.emit(auction, 'PaymentProcessed') // TODO args
+                .to.emit(auction, 'SponsorDeactivated')
+                .withArgs(feeCampaignId, sponsorId2)
+                .to.emit(auction, 'SponsorActivated')
+                .withArgs(feeCampaignId, sponsorId3)
+                .to.emit(auction, 'SponsorSwapped')
+                .withArgs(feeCampaignId, sponsorId2, sponsorId3);
+
+
+              sponsor2 = await auction.getSponsor(sponsorId2);
+              expect(sponsor2.active).to.equal(false);
+              let sponsor3 = await auction.getSponsor(sponsorId3);
+              expect(sponsor3.active).to.equal(true);
+
+              activeSponsors = await auction.getActiveSponsors(feeCampaignId);
+              expect(activeSponsors).to.deep.equal([sponsorId, sponsorId3]);
+
+
+              await expect(auction.swap(sponsorId2, sponsorId))
+                .to.emit(auction, 'PaymentProcessed') // TODO args
+                .to.emit(auction, 'SponsorDeactivated')
+                .withArgs(feeCampaignId, sponsorId)
+                .to.emit(auction, 'SponsorActivated')
+                .withArgs(feeCampaignId, sponsorId2)
+                .to.emit(auction, 'SponsorSwapped')
+                .withArgs(feeCampaignId, sponsorId, sponsorId2);
+
+
+              sponsor2 = await auction.getSponsor(sponsorId2);
+              expect(sponsor2.active).to.equal(true);
+              let sponsor1 = await auction.getSponsor(sponsorId);
+              expect(sponsor1.active).to.equal(false);
+
+              activeSponsors = await auction.getActiveSponsors(feeCampaignId);
+              expect(activeSponsors).to.deep.equal([sponsorId2, sponsorId3]);
+            });
+          });
         });
       });
     });

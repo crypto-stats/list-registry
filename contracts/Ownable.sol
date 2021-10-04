@@ -4,7 +4,7 @@ pragma solidity ^0.8.4;
 error MustBeCalledByOwner();
 
 contract Ownable {
-  address owner;
+  address public owner;
 
   event OwnershipTransferred(address indexed newOwner);
 
