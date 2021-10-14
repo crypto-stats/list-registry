@@ -21,6 +21,7 @@ error MustWithdrawBalanceToChangeToken(bytes32 sponsorId);
 error InsufficentBidToSwap(uint256 currentBid, uint256 attemptedSwapBid);
 
 contract SponsorAuction is Ownable {
+  // This his struct is packed to take up 4 storage slots, plus variable slots for the metadata string
   struct Sponsor {
     uint128 balance;         // 16 bytes -- slot 1
     bool approved;           // 1 byte
@@ -89,6 +90,16 @@ contract SponsorAuction is Ownable {
 
   // View functions
 
+  /// @notice Returns details about a given sponsor
+  /// @param sponsorId The ID of a sponsor
+  /// @return owner The owner of the sponsorship
+  /// @return approved Whether the sponsorship is approved by the auction owner
+  /// @return active Whether the sponsorship holds an active slot
+  /// @return token The payment token
+  /// @return paymentPerSecond The amount of tokens-per-second to pay when the sponsorship is active
+  /// @return campaign The campaign the sponsorship is part of
+  /// @return lastUpdated Timestamp of the last time the sponsor was activated/disactivated
+  /// @return metadata Any metadata (such as an IPFS CID)
   function getSponsor(bytes32 sponsorId) external view returns (
     address owner,
     bool approved,
@@ -110,12 +121,21 @@ contract SponsorAuction is Ownable {
     metadata = sponsor.metadata;
   }
 
+  /// @notice Returns details about a given campaign
+  /// @param campaignId The ID of a campaign (often a short string)
+  /// @return slots The maximum simultaneous active sponsorships in this campaign
+  /// @return activeSlots The number of sponsors in this campaign that are currently active
   function getCampaign(bytes16 campaignId) external view returns (uint8 slots, uint8 activeSlots) {
     Campaign memory campaign = campaigns[campaignId];
     slots = campaign.slots;
     activeSlots = campaign.activeSlots;
   }
 
+  /// @notice The current balance of a sponsorship, which may change per-second when active
+  /// @param sponsorId The ID of a sponsor
+  /// @return balance The current balance, factoring any pending payment
+  /// @return storedBalance The balance of the sponsorship on the last update
+  /// @return pendingPayment Any payments that have accrued since the last update (increases every second when active)
   function sponsorBalance(bytes32 sponsorId) external view returns (
     uint128 balance,
     uint128 storedBalance,
@@ -135,6 +155,9 @@ contract SponsorAuction is Ownable {
     balance = storedBalance - pendingPayment;
   }
 
+  /// @notice Returns the IDs of all active sponsors in a campaign. Due to the unbounded loop, should only be called by frontend
+  /// @param campaignId The ID of a campaign (often a short string)
+  /// @return activeSponsors ID of all active sponsors
   function getActiveSponsors(bytes16 campaignId) external view returns (bytes32[] memory activeSponsors) {
     Campaign memory campaign = campaigns[campaignId];
     activeSponsors = new bytes32[](campaign.activeSlots);
@@ -144,6 +167,10 @@ contract SponsorAuction is Ownable {
     }
   }
 
+  /// @notice The current payment-per-second of a sponsorship bid
+  /// @param sponsorId The ID of a sponsor
+  /// @return paymentPerSecond The payment-per-second in the payment token
+  /// @return paymentPerSecondInETH The payment-per-second, converted to ETH using the oracle
   function paymentRate(bytes32 sponsorId) external view returns (
     uint128 paymentPerSecond,
     uint128 paymentPerSecondInETH
@@ -159,6 +186,12 @@ contract SponsorAuction is Ownable {
 
   // Sponsor functions
 
+  /// @notice Create a new unapproved sponsorship
+  /// @param _token The ERC20 token to denominate payment in
+  /// @param campaign The ID of the campaign to submit the sponsorship to
+  /// @param paymentPerSecond The payment-per-second in the payment token
+  /// @param metadata Any data to attach to the sponsorship (such as an IPFS CID)
+  /// @return id The psuedo-randomly generated ID for the new sponsorship
   function createSponsor(
     address _token,
     bytes16 campaign,
@@ -167,7 +200,11 @@ contract SponsorAuction is Ownable {
     string calldata metadata
   ) external returns (bytes32 id) {
     if (campaign == bytes16(0) || _token == address(0)) {
-      // TODO: ensure paymentPerSecond is small enough that the payment always fits into uint128
+      revert InvalidValue();
+    }
+
+    // Prevent overflow attacks
+    if (uint256(paymentPerSecond) * 365 days > type(uint128).max) {
       revert InvalidValue();
     }
 
@@ -198,6 +235,9 @@ contract SponsorAuction is Ownable {
     }
   }
 
+  /// @notice Deposit tokens into the balance of an existing sponsorship (may be called by anyone)
+  /// @param sponsorId The ID of a sponsor
+  /// @param amount Amount of tokens to deposit (must be ERC20-approved)
   function deposit(bytes32 sponsorId, uint256 amount) external {
     Sponsor memory sponsor = sponsors[sponsorId];
     if (sponsor.owner == address(0)) {
@@ -215,17 +255,22 @@ contract SponsorAuction is Ownable {
     }
   }
 
+  /// @notice Update the token or payment-per-second of a sponsorship (only called by sponsorship owner)
+  /// @param sponsorId The ID of a sponsorship to update
+  /// @param token The new token to associate with the bid. If different, balance must be 0
+  /// @param paymentPerSecond The payment-per-second bid
   function updateBid(bytes32 sponsorId, address token, uint128 paymentPerSecond) external {
     Sponsor memory sponsor = sponsors[sponsorId];
     if (sponsor.owner != msg.sender) {
       revert MustBeCalledBySponsorOwner(sponsor.owner);
     }
 
+    uint256 currentBalance = sponsor.balance;
     if (sponsor.active) {
-      updateSponsor(sponsorId, sponsor, false, false);
+      (, currentBalance) = updateSponsor(sponsorId, sponsor, false, false);
     }
 
-    if (address(sponsor.token) != token && sponsor.balance > 0) {
+    if (address(sponsor.token) != token && currentBalance > 0) {
       revert MustWithdrawBalanceToChangeToken(sponsorId);
     }
 
@@ -235,6 +280,9 @@ contract SponsorAuction is Ownable {
     emit BidUpdated(sponsorId, token, paymentPerSecond);
   }
 
+  /// @notice Update the metadata of a sponsor (only called by sponsorship owner, will deactivate/unapprove sponsorship)
+  /// @param sponsorId The ID of a sponsorship to update
+  /// @param metadata New metadata value
   function updateMetadata(bytes32 sponsorId, string calldata metadata) external {
     Sponsor memory sponsor = sponsors[sponsorId];
     address _owner = sponsor.owner;
@@ -263,6 +311,10 @@ contract SponsorAuction is Ownable {
     }
   }
 
+  /// @notice Withdraw funds from a sponsorship (only called by sponsorship owner)
+  /// @param sponsorId The ID of a sponsorship to update
+  /// @param amountRequested The amount of tokens to withdraw. If 0 or greater than the current balance, will withdraw current balance
+  /// @param recipient Address to receive tokens
   function withdraw(
     bytes32 sponsorId,
     uint256 amountRequested,
@@ -283,8 +335,9 @@ contract SponsorAuction is Ownable {
       return 0;
     }
 
-    uint128 _withdrawAmount = uint128(amountRequested) > balance ? balance : uint128(amountRequested);
-    withdrawAmount = _withdrawAmount;
+    withdrawAmount = uint128(amountRequested) > balance || amountRequested == 0
+      ? balance
+      : uint128(amountRequested);
 
     if (active && withdrawAmount == balance) {
       clearSlot(sponsor.campaign, sponsor.slot);
@@ -294,13 +347,16 @@ contract SponsorAuction is Ownable {
       emit SponsorDeactivated(sponsor.campaign, sponsorId);
     }
 
-    sponsors[sponsorId].balance = balance - _withdrawAmount;
+    sponsors[sponsorId].balance = balance - uint128(withdrawAmount);
 
     SafeERC20.safeTransfer(sponsor.token, recipient, withdrawAmount);
 
     emit Withdrawal(sponsorId, address(sponsor.token), withdrawAmount);
   }
 
+  /// @notice Transfer ownership of sponsor to a new address (only called by current owner)
+  /// @param sponsorId The ID of a sponsorship to update
+  /// @param newOwner Address of new owner account
   function transferSponsorOwnership(bytes32 sponsorId, address newOwner) external {
     address _owner = sponsors[sponsorId].owner;
     if (_owner != msg.sender) {
@@ -336,7 +392,7 @@ contract SponsorAuction is Ownable {
     campaigns[sponsor.campaign].activeSlots = campaign.activeSlots + 1;
   }
 
-  /// @notice If a campaign reduces the number of slots, any active sponsor may be dropped
+  /// @notice Deactive a sponsor if the balance reaches 0 or the number of slots is reduced
   /// @param sponsorId The ID of a sponsor
   function drop(bytes32 sponsorId) external {
     Sponsor memory sponsor = sponsors[sponsorId];
@@ -346,14 +402,16 @@ contract SponsorAuction is Ownable {
 
     Campaign memory campaign = campaigns[sponsor.campaign];
 
-    if (campaign.activeSlots <= campaign.slots) {
+    (, uint256 newBalance) = updateSponsor(sponsorId, sponsor, true, false);
+
+    if (newBalance > 0 && campaign.activeSlots <= campaign.slots) {
       revert SponsorListNotOversized(sponsor.campaign);
     }
-
-    updateSponsor(sponsorId, sponsor, true, false);
-    campaigns[sponsor.campaign].activeSlots = campaign.activeSlots - 1;
   }
 
+  /// @notice Swaps an active sponsor for an inactive sponsor with higher bid (called by anyone)
+  /// @param inactiveSponsorId The ID of a sponsor that is approved but inactive
+  /// @param activeSponsorId The ID of a sponsor with an empty balance, or a lower bid
   function swap(bytes32 inactiveSponsorId, bytes32 activeSponsorId) external {
     Sponsor memory inactiveSponsor = sponsors[inactiveSponsorId];
     Sponsor memory activeSponsor = sponsors[activeSponsorId];
@@ -371,9 +429,6 @@ contract SponsorAuction is Ownable {
       revert SponsorBalanceEmpty(inactiveSponsorId);
     }
 
-    if (activeSponsorId == bytes32(0)) {
-      revert InvalidValue(); // Active sponsor doesn't exist
-    }
     if (!activeSponsor.active) {
       revert SponsorInactive(activeSponsorId);
     }
@@ -400,6 +455,8 @@ contract SponsorAuction is Ownable {
     );
   }
 
+  /// @notice Process the payment of an active sponsor, deactivating if balance reaches 0. (Called by anyone)
+  /// @param sponsorId The ID of a sponsor
   function processPayment(bytes32 sponsorId) external {
     Sponsor memory sponsor = sponsors[sponsorId];
     if (!sponsor.active) {
@@ -411,16 +468,25 @@ contract SponsorAuction is Ownable {
 
   // Owner actions
 
+  /// @notice Approves or unapproves a sponsor. (Called by auction owner)
+  /// @param sponsorId The ID of a sponsor
+  /// @param approved New approval value
   function setApproved(bytes32 sponsorId, bool approved) external onlyOwner {
     sponsors[sponsorId].approved = approved;
     emit ApprovalSet(sponsorId, approved);
   }
 
+  /// @notice Set the number of potential active sponsors of a campaign. (Called by auction owner)
+  /// @param campaign The ID of a campaign
+  /// @param newNumSlots Number of potential active sponsors
   function setNumSlots(bytes16 campaign, uint8 newNumSlots) external onlyOwner {
     campaigns[campaign].slots = newNumSlots;
     emit NumberOfSlotsChanged(campaign, newNumSlots);
   }
 
+  /// @notice Withdraw tokens collected from sponsors. (Called by auction owner)
+  /// @param token Token to withdraw
+  /// @param recipient Address to receive payment
   function withdrawTreasury(address token, address recipient) external onlyOwner returns (uint256 amount) {
     amount = paymentCollected[token];
     if (amount > 0) {
@@ -432,6 +498,7 @@ contract SponsorAuction is Ownable {
 
   // Private functions
 
+  /// @notice Calling function must ensure sponsor is currently inactive
   function activateSponsor(bytes32 sponsorId, bytes16 campaign, uint8 slot) private {
     sponsors[sponsorId].lastUpdated = uint32(block.timestamp);
     sponsors[sponsorId].active = true;
@@ -489,6 +556,7 @@ contract SponsorAuction is Ownable {
     }
   }
 
+  /// @notice Remove a sponsor from a campaign's list of active sponsors
   function clearSlot(bytes16 campaignId, uint256 slot) private {
     Campaign memory campaign = campaigns[campaignId];
 
@@ -502,6 +570,7 @@ contract SponsorAuction is Ownable {
     campaigns[campaignId].activeSlots = campaign.activeSlots - 1;
   }
 
+  /// @notice Transfer an approved token from the sender to the contract
   function _deposit(IERC20 token, uint256 amount) private returns (uint128) {
     uint256 startingBalance = token.balanceOf(address(this));
     SafeERC20.safeTransferFrom(token, msg.sender, address(this), amount);
