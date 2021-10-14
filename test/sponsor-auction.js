@@ -339,6 +339,27 @@ describe("SponsorAuction", function() {
               activeSponsors = await auction.getActiveSponsors(feeCampaignId);
               expect(activeSponsors).to.deep.equal([sponsorId2, sponsorId3]);
             });
+
+            it('should allow swapping a sponsor that has run out of balance', async () => {
+              await auction.lift(sponsorId3);
+
+              await ethers.provider.send("evm_increaseTime", [10000])
+              await ethers.provider.send("evm_mine");
+
+              const balance = await auction.sponsorBalance(sponsorId3);
+              expect(balance.balance).to.equal(0);
+              expect(balance.storedBalance).to.equal(1000);
+              expect(balance.pendingPayment).to.equal(1000);
+
+              await expect(auction.swap(sponsorId2, sponsorId3))
+                .to.emit(auction, 'PaymentProcessed') // TODO args
+                .to.emit(auction, 'SponsorDeactivated')
+                .withArgs(feeCampaignId, sponsorId3)
+                .to.emit(auction, 'SponsorActivated')
+                .withArgs(feeCampaignId, sponsorId2)
+                .to.emit(auction, 'SponsorSwapped')
+                .withArgs(feeCampaignId, sponsorId3, sponsorId2);
+            });
           });
         });
       });

@@ -378,14 +378,18 @@ contract SponsorAuction is Ownable {
       revert SponsorInactive(activeSponsorId);
     }
 
-    uint256 inactiveBidInETH = oracle.getPrice(address(inactiveSponsor.token), inactiveSponsor.paymentPerSecond);
-    uint256 activeBidInETH = oracle.getPrice(address(activeSponsor.token), activeSponsor.paymentPerSecond);
+    (, uint256 newBalance) = updateSponsor(activeSponsorId, activeSponsor, true, true);
 
-    if (inactiveBidInETH <= activeBidInETH) {
-      revert InsufficentBidToSwap(activeBidInETH, inactiveBidInETH);
+    // If the active sponsor has an empty balance, we can swap in any approved sponsor
+    // If the balance isn't empty, then we compare bids
+    if (newBalance != 0) {
+      uint256 inactiveBidInETH = oracle.getPrice(address(inactiveSponsor.token), inactiveSponsor.paymentPerSecond);
+      uint256 activeBidInETH = oracle.getPrice(address(activeSponsor.token), activeSponsor.paymentPerSecond);
+
+      if (inactiveBidInETH <= activeBidInETH) {
+        revert InsufficentBidToSwap(activeBidInETH, inactiveBidInETH);
+      }
     }
-
-    updateSponsor(activeSponsorId, activeSponsor, true, true);
 
     activateSponsor(inactiveSponsorId, inactiveSponsor.campaign, activeSponsor.slot);
 
